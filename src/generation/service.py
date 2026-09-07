@@ -51,18 +51,22 @@ class GenerationService:
         )
 
         job.mark_running()
-        result = self._gateway.generate(
-            ProviderRequest(capability=request.capability, payload=request.payload),
-            provider_id=request.provider_id,
-        )
-        if not result.success:
-            job.mark_failed(result.error or "Provider generation failed")
-            return GenerationResult(job=job)
+        try:
+            result = self._gateway.generate(
+                ProviderRequest(capability=request.capability, payload=request.payload),
+                provider_id=request.provider_id,
+            )
+            if not result.success:
+                job.mark_failed(result.error or "Provider generation failed")
+                return GenerationResult(job=job)
 
-        artifacts = self._persist_output(result.output, request)
-        job.provider = result.provider_id or provider_id
-        job.mark_succeeded([artifact.id for artifact in artifacts])
-        return GenerationResult(job=job, artifacts=artifacts)
+            artifacts = self._persist_output(result.output, request)
+            job.provider = result.provider_id or provider_id
+            job.mark_succeeded([artifact.id for artifact in artifacts])
+            return GenerationResult(job=job, artifacts=artifacts)
+        except Exception as exc:
+            job.mark_failed(str(exc) or exc.__class__.__name__)
+            return GenerationResult(job=job)
 
     def _persist_output(self, output: Any, request: GenerationRequest) -> list[Artifact]:
         if output is None:
