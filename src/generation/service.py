@@ -8,6 +8,7 @@ from src.ai_providers import Capability, ProviderGateway, ProviderRequest
 from src.artifacts import Artifact, ArtifactStorage, ArtifactType
 
 from .models import GenerationJob
+from .repository import GenerationJobRepository
 
 
 @dataclass(frozen=True)
@@ -35,9 +36,15 @@ class GenerationResult:
 class GenerationService:
     """Coordinates provider execution, job lifecycle, and artifact persistence."""
 
-    def __init__(self, gateway: ProviderGateway, storage: ArtifactStorage) -> None:
+    def __init__(
+        self,
+        gateway: ProviderGateway,
+        storage: ArtifactStorage,
+        repository: GenerationJobRepository,
+    ) -> None:
         self._gateway = gateway
         self._storage = storage
+        self._repository = repository
 
     def generate(self, request: GenerationRequest) -> GenerationResult:
         provider_id = request.provider_id or "auto"
@@ -49,8 +56,10 @@ class GenerationService:
             capability=request.capability,
             input_refs=list(request.input_refs),
         )
+        self._repository.save(job)
 
         job.mark_running()
+        self._repository.save(job)
         try:
             result = self._gateway.generate(
                 ProviderRequest(capability=request.capability, payload=request.payload),
@@ -58,14 +67,17 @@ class GenerationService:
             )
             if not result.success:
                 job.mark_failed(result.error or "Provider generation failed")
+                self._repository.save(job)
                 return GenerationResult(job=job)
 
             artifacts = self._persist_output(result.output, request)
             job.provider = result.provider_id or provider_id
             job.mark_succeeded([artifact.id for artifact in artifacts])
+            self._repository.save(job)
             return GenerationResult(job=job, artifacts=artifacts)
         except Exception as exc:
             job.mark_failed(str(exc) or exc.__class__.__name__)
+            self._repository.save(job)
             return GenerationResult(job=job)
 
     def _persist_output(self, output: Any, request: GenerationRequest) -> list[Artifact]:
