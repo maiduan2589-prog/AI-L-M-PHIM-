@@ -7,7 +7,10 @@ from typing import Any
 
 class ProductionStage(str, Enum):
     PLANNED = "planned"
-    RUNNING = "running"
+    STORY = "story"
+    SCREENPLAY = "screenplay"
+    SCENE_BREAKDOWN = "scene_breakdown"
+    SHOT_PLAN = "shot_plan"
     EVALUATING = "evaluating"
     REVISING = "revising"
     APPROVED = "approved"
