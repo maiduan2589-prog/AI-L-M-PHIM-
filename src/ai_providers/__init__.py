@@ -1,4 +1,5 @@
 from .base import ProviderAdapter
+from .gateway import ProviderGateway
 from .models import (
     Capability,
     ProviderError,
@@ -13,6 +14,7 @@ __all__ = [
     "Capability",
     "ProviderAdapter",
     "ProviderError",
+    "ProviderGateway",
     "ProviderMetadata",
     "ProviderRegistry",
     "ProviderRequest",
