@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
 
 from .models import ProductionContext, ProductionStage, StageResult
 
@@ -9,16 +8,10 @@ StageHandler = Callable[[ProductionContext], StageResult]
 
 
 class ProductionEngine:
-    """Small, resumable state machine for autonomous film production.
-
-    Handlers are injected so the engine stays provider-agnostic. A handler may
-    call an LLM, image model, video model, renderer, or another service without
-    coupling the orchestration layer to a vendor.
-    """
+    """Provider-agnostic, resumable production state machine."""
 
     ORDER = (
         ProductionStage.PLANNED,
-        ProductionStage.RUNNING,
         ProductionStage.EVALUATING,
         ProductionStage.REVISING,
         ProductionStage.APPROVED,
@@ -33,11 +26,7 @@ class ProductionEngine:
         self.max_retries = max_retries
 
     def run(self, context: ProductionContext) -> ProductionContext:
-        """Run from the context's current stage and stop only on success/failure.
-
-        Persisting ``context`` outside this class makes the workflow resumable:
-        after a process crash, reload the context and call ``run`` again.
-        """
+        """Run from the persisted stage, allowing a later process to resume."""
         if context.stage == ProductionStage.PUBLISHED:
             return context
         if context.stage == ProductionStage.FAILED:
@@ -54,7 +43,6 @@ class ProductionEngine:
             if handler is None:
                 raise KeyError(f"No handler registered for stage: {stage.value}")
 
-            context.stage = ProductionStage.RUNNING
             result = self._execute_with_retry(stage, handler, context)
             if not result.success:
                 context.stage = ProductionStage.FAILED
@@ -63,12 +51,17 @@ class ProductionEngine:
 
             context.data.update(result.outputs)
             context.record("stage_completed", stage=stage.value, outputs=result.outputs)
-            context.stage = stage
 
-            # Evaluation and revision are deliberately explicit stages. A
-            # future evaluator can set data["needs_revision"] to drive a loop.
+            # Evaluation can request a revision. Revision returns to evaluation
+            # after its repair, preventing an accidental one-way pass-through.
             if stage == ProductionStage.EVALUATING and context.data.get("needs_revision"):
                 context.stage = ProductionStage.REVISING
+                continue
+            if stage == ProductionStage.REVISING:
+                context.data["needs_revision"] = False
+                context.stage = ProductionStage.EVALUATING
+                continue
+            context.stage = stage
 
         return context
 
