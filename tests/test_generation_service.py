@@ -9,7 +9,7 @@ from src.ai_providers import (
     ProviderResult,
 )
 from src.artifacts import Artifact, ArtifactStorage, ArtifactType
-from src.generation import GenerationJobStatus
+from src.generation import GenerationJob, GenerationJobStatus
 from src.generation.service import GenerationRequest, GenerationService
 
 
@@ -180,3 +180,21 @@ def test_existing_artifact_output_is_not_rewritten() -> None:
     assert result.job.status is GenerationJobStatus.SUCCEEDED
     assert result.artifacts == [artifact]
     assert storage.items == {}
+
+
+def test_failed_job_can_be_marked_running_again_for_retry() -> None:
+    job = GenerationJob(
+        id="job-1",
+        project_id="project-1",
+        stage="image_generation",
+        provider="fake",
+        capability=Capability.IMAGE_GENERATE,
+    )
+
+    job.mark_running()
+    job.mark_failed("temporary failure")
+    job.mark_running()
+
+    assert job.status is GenerationJobStatus.RUNNING
+    assert job.attempt == 2
+    assert job.error is None
