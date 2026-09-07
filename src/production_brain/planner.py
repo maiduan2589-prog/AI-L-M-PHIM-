@@ -10,45 +10,25 @@ Planner = Callable[[dict[str, Any]], dict[str, Any]]
 
 
 class ProductionPlanner:
-    """Transforms a normalized brief into structured production artifacts.
+    """Transforms a normalized brief into structured production artifacts."""
 
-    AI calls are injected as functions. This keeps prompts/models/providers out
-    of the domain and makes each planning stage independently testable.
-    """
-
-    def __init__(
-        self,
-        story: Planner,
-        screenplay: Planner,
-        scene_breakdown: Planner,
-        shot_plan: Planner,
-    ) -> None:
+    def __init__(self, story: Planner, screenplay: Planner, scene_breakdown: Planner, shot_plan: Planner) -> None:
         self.story = story
         self.screenplay = screenplay
         self.scene_breakdown = scene_breakdown
         self.shot_plan = shot_plan
 
     def plan_story(self, context: ProductionContext) -> StageResult:
-        brief = self._brief(context)
-        return self._call(self.story, build_story_input(brief), "story")
+        return self._call(self.story, build_story_input(self._brief(context)), "story")
 
     def plan_screenplay(self, context: ProductionContext) -> StageResult:
-        story = context.data.get("story")
-        if not story:
-            return StageResult(False, error="story output is required", retryable=False)
-        return self._call(self.screenplay, {"story": story}, "screenplay")
+        return self._required(self.screenplay, context, "story", "screenplay")
 
     def plan_scenes(self, context: ProductionContext) -> StageResult:
-        screenplay = context.data.get("screenplay")
-        if not screenplay:
-            return StageResult(False, error="screenplay output is required", retryable=False)
-        return self._call(self.scene_breakdown, {"screenplay": screenplay}, "scenes")
+        return self._required(self.scene_breakdown, context, "screenplay", "scenes")
 
     def plan_shots(self, context: ProductionContext) -> StageResult:
-        scenes = context.data.get("scenes")
-        if not scenes:
-            return StageResult(False, error="scene breakdown output is required", retryable=False)
-        return self._call(self.shot_plan, {"scenes": scenes}, "shot_plan")
+        return self._required(self.shot_plan, context, "scenes", "shot_plan")
 
     @staticmethod
     def _brief(context: ProductionContext) -> ProjectBrief:
@@ -58,6 +38,13 @@ class ProductionPlanner:
         if not isinstance(value, dict):
             raise ValueError("context.data['brief'] must contain a ProjectBrief or dictionary")
         return ProjectBrief(**value)
+
+    @staticmethod
+    def _required(planner: Planner, context: ProductionContext, input_key: str, output_key: str) -> StageResult:
+        value = context.data.get(input_key)
+        if not value:
+            return StageResult(False, error=f"{input_key} output is required", retryable=False)
+        return ProductionPlanner._call(planner, {input_key: value}, output_key)
 
     @staticmethod
     def _call(planner: Planner, payload: dict[str, Any], key: str) -> StageResult:
@@ -71,10 +58,10 @@ class ProductionPlanner:
 
 
 def build_planning_handlers(planner: ProductionPlanner) -> dict[ProductionStage, Callable[[ProductionContext], StageResult]]:
-    """Create engine handlers for the planning sequence."""
+    """Register only the four planning stages; execution/QA stages are separate."""
     return {
-        ProductionStage.PLANNED: planner.plan_story,
-        ProductionStage.EVALUATING: planner.plan_screenplay,
-        ProductionStage.REVISING: planner.plan_scenes,
-        ProductionStage.APPROVED: planner.plan_shots,
+        ProductionStage.STORY: planner.plan_story,
+        ProductionStage.SCREENPLAY: planner.plan_screenplay,
+        ProductionStage.SCENE_BREAKDOWN: planner.plan_scenes,
+        ProductionStage.SHOT_PLAN: planner.plan_shots,
     }
