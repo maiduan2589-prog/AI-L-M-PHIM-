@@ -19,11 +19,14 @@ class FakeProvider:
     output: bytes | Artifact
     success: bool = True
     error: str | None = None
+    raises: Exception | None = None
 
     def supports(self, capability: Capability) -> bool:
         return capability in self.metadata.capabilities
 
     def generate(self, request: ProviderRequest) -> ProviderResult:
+        if self.raises is not None:
+            raise self.raises
         return ProviderResult(
             success=self.success,
             output=self.output if self.success else None,
@@ -34,8 +37,11 @@ class FakeProvider:
 class MemoryStorage:
     def __init__(self) -> None:
         self.items: dict[str, bytes] = {}
+        self.raises: Exception | None = None
 
     def put(self, artifact: Artifact, data: bytes) -> Artifact:
+        if self.raises is not None:
+            raise self.raises
         self.items[artifact.id] = data
         return artifact
 
@@ -99,6 +105,54 @@ def test_failed_provider_marks_job_failed_without_artifacts() -> None:
     assert result.job.status is GenerationJobStatus.FAILED
     assert result.job.error == "provider unavailable"
     assert result.artifacts == []
+
+
+def test_provider_exception_marks_job_failed() -> None:
+    provider = FakeProvider(
+        ProviderMetadata("fake", "Fake", frozenset({Capability.VIDEO_GENERATE})),
+        b"unused",
+        raises=RuntimeError("provider crashed"),
+    )
+    service = build_service(provider, MemoryStorage())
+
+    result = service.generate(
+        GenerationRequest(
+            project_id="project-1",
+            stage="video_generation",
+            capability=Capability.VIDEO_GENERATE,
+            payload={"prompt": "scene"},
+        )
+    )
+
+    assert result.job.status is GenerationJobStatus.FAILED
+    assert result.job.error == "provider crashed"
+    assert result.artifacts == []
+
+
+def test_storage_exception_marks_job_failed_without_partial_success() -> None:
+    provider = FakeProvider(
+        ProviderMetadata("fake", "Fake", frozenset({Capability.IMAGE_GENERATE})),
+        b"image-bytes",
+    )
+    storage = MemoryStorage()
+    storage.raises = OSError("storage unavailable")
+    service = build_service(provider, storage)
+
+    result = service.generate(
+        GenerationRequest(
+            project_id="project-1",
+            stage="image_generation",
+            capability=Capability.IMAGE_GENERATE,
+            payload={"prompt": "a film frame"},
+            artifact_type=ArtifactType.IMAGE,
+        )
+    )
+
+    assert result.job.status is GenerationJobStatus.FAILED
+    assert result.job.error == "storage unavailable"
+    assert result.artifacts == []
+    assert result.job.output_refs == []
+    assert storage.items == {}
 
 
 def test_existing_artifact_output_is_not_rewritten() -> None:
