@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .base import ProviderAdapter
-from .models import Capability, ProviderAdapter if False else ProviderMetadata
+from .models import Capability, ProviderMetadata
 
 
 class ProviderRegistry:
@@ -31,12 +31,7 @@ class ProviderRegistry:
         return tuple(p.metadata for p in self._providers.values())
 
     def find(self, capability: Capability) -> tuple[ProviderAdapter, ...]:
-        return tuple(
-            sorted(
-                (p for p in self._providers.values() if p.metadata.enabled and p.supports(capability)),
-                key=lambda p: (p.metadata.priority, p.metadata.provider_id),
-            )
-        )
+        return tuple(sorted((p for p in self._providers.values() if p.metadata.enabled and p.supports(capability)), key=lambda p: (p.metadata.priority, p.metadata.provider_id)))
 
     def select(self, capability: Capability, provider_id: str | None = None) -> ProviderAdapter:
         if provider_id is not None:
