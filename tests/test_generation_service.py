@@ -9,7 +9,11 @@ from src.ai_providers import (
     ProviderResult,
 )
 from src.artifacts import Artifact, ArtifactStorage, ArtifactType
-from src.generation import GenerationJob, GenerationJobStatus
+from src.generation import (
+    GenerationJob,
+    GenerationJobStatus,
+    InMemoryGenerationJobRepository,
+)
 from src.generation.service import GenerationRequest, GenerationService
 
 
@@ -52,10 +56,15 @@ class MemoryStorage:
         self.items.pop(artifact.id, None)
 
 
-def build_service(provider: FakeProvider, storage: ArtifactStorage) -> GenerationService:
+def build_service(
+    provider: FakeProvider,
+    storage: ArtifactStorage,
+    repository: InMemoryGenerationJobRepository | None = None,
+) -> tuple[GenerationService, InMemoryGenerationJobRepository]:
     registry = ProviderRegistry()
     registry.register(provider)
-    return GenerationService(ProviderGateway(registry), storage)
+    job_repository = repository or InMemoryGenerationJobRepository()
+    return GenerationService(ProviderGateway(registry), storage, job_repository), job_repository
 
 
 def test_generate_persists_bytes_and_completes_job() -> None:
@@ -64,7 +73,7 @@ def test_generate_persists_bytes_and_completes_job() -> None:
         b"image-bytes",
     )
     storage = MemoryStorage()
-    service = build_service(provider, storage)
+    service, repository = build_service(provider, storage)
 
     result = service.generate(
         GenerationRequest(
@@ -82,6 +91,7 @@ def test_generate_persists_bytes_and_completes_job() -> None:
     assert len(result.artifacts) == 1
     assert result.job.output_refs == [result.artifacts[0].id]
     assert storage.items[result.artifacts[0].id] == b"image-bytes"
+    assert repository.get(result.job.id) is result.job
 
 
 def test_failed_provider_marks_job_failed_without_artifacts() -> None:
@@ -91,7 +101,7 @@ def test_failed_provider_marks_job_failed_without_artifacts() -> None:
         success=False,
         error="provider unavailable",
     )
-    service = build_service(provider, MemoryStorage())
+    service, _ = build_service(provider, MemoryStorage())
 
     result = service.generate(
         GenerationRequest(
@@ -113,7 +123,7 @@ def test_provider_exception_marks_job_failed() -> None:
         b"unused",
         raises=RuntimeError("provider crashed"),
     )
-    service = build_service(provider, MemoryStorage())
+    service, _ = build_service(provider, MemoryStorage())
 
     result = service.generate(
         GenerationRequest(
@@ -136,7 +146,7 @@ def test_storage_exception_marks_job_failed_without_partial_success() -> None:
     )
     storage = MemoryStorage()
     storage.raises = OSError("storage unavailable")
-    service = build_service(provider, storage)
+    service, _ = build_service(provider, storage)
 
     result = service.generate(
         GenerationRequest(
@@ -160,7 +170,7 @@ def test_invalid_provider_output_marks_job_failed() -> None:
         ProviderMetadata("fake", "Fake", frozenset({Capability.TEXT_GENERATE})),
         "not-bytes",
     )
-    service = build_service(provider, MemoryStorage())
+    service, _ = build_service(provider, MemoryStorage())
 
     result = service.generate(
         GenerationRequest(
@@ -187,7 +197,7 @@ def test_existing_artifact_output_is_not_rewritten() -> None:
         artifact,
     )
     storage = MemoryStorage()
-    service = build_service(provider, storage)
+    service, _ = build_service(provider, storage)
 
     result = service.generate(
         GenerationRequest(
