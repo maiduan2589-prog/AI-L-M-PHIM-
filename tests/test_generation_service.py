@@ -16,7 +16,7 @@ from src.generation.service import GenerationRequest, GenerationService
 @dataclass
 class FakeProvider:
     metadata: ProviderMetadata
-    output: bytes | Artifact
+    output: bytes | Artifact | str
     success: bool = True
     error: str | None = None
     raises: Exception | None = None
@@ -153,6 +153,27 @@ def test_storage_exception_marks_job_failed_without_partial_success() -> None:
     assert result.artifacts == []
     assert result.job.output_refs == []
     assert storage.items == {}
+
+
+def test_invalid_provider_output_marks_job_failed() -> None:
+    provider = FakeProvider(
+        ProviderMetadata("fake", "Fake", frozenset({Capability.TEXT_GENERATE})),
+        "not-bytes",
+    )
+    service = build_service(provider, MemoryStorage())
+
+    result = service.generate(
+        GenerationRequest(
+            project_id="project-1",
+            stage="text_generation",
+            capability=Capability.TEXT_GENERATE,
+            payload={"prompt": "story"},
+        )
+    )
+
+    assert result.job.status is GenerationJobStatus.FAILED
+    assert result.job.error == "Provider output must be bytes or Artifact"
+    assert result.artifacts == []
 
 
 def test_existing_artifact_output_is_not_rewritten() -> None:
